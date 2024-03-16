@@ -1,190 +1,454 @@
+# from loguru import logger  # 日志
+import time
+import os
 import sys
-import queue
-import random
-from bfs import bfsToBerth
-
-N = 210 
+from bfs import robotToGoods,goodsToBerth,saveReDfs
+from copy import deepcopy
 
 n = 200 # 地图大小
 money = 0
 boat_capacity = 0
-id = 0
-ch = [] # 地图
+# id = 0
 
 robot_num = 10 # 机器人数量
 boat_num = 5 # 船的数量
 berth_num = 10 # 港口数量
+cacheSize = 1000 # 机器人路径缓存大小
 
-goodList = []
-goodID = 0 # 货物编号
-goodNum = 0 # 货物总数
+class Controller:
+    def __init__(self):
+        self.ch = [] # 地图
+        self.timeID = 0 # 时间标号
+        self.goodsID = 0 # 货物标号
 
-AllStep = 0 # 总步数
-AllMoney = 0 # 总收益
+        self.goodsMap =  {} # 货物字典  {货物编号，货物对象}
+        self.goodsList = [] # 货物列表  (存放排序后索引)
+        
+        self.berthList = [i for i in range(berth_num)] # 港口列表
 
-cacheSize = 10 # 机器人路径缓存大小
+        self.AllStep = 0 # 总步数
+        self.AllMoney = 0 # 总收益
+
+    def add_goods(self, x, y, value, zhenID):
+        self.goodsMap[self.goodsID] = Goods(x, y, value, self.goodsID, zhenID)
+        self.ch[x][y] = 'G'
+        self.goodsMap[self.goodsID].update() # 更新货物信息
+        self.goodsList.append(self.goodsID)
+        self.goodsID += 1
+
+    def pick_goods(self,goodsID):
+        self.ch[self.goodsMap[goodsID]._x][self.goodsMap[goodsID]._y] = 'X'
+        self.goodsList.remove(goodsID)
+        
+
+    def del_goods(self,goodsID):
+        
+        self.AllMoney -= controller.goodsMap[goodsID]._value
+        self.AllStep -= controller.goodsMap[goodsID].minStep
+        self.ch[self.goodsMap[goodsID]._x][self.goodsMap[goodsID]._y] = '.'
+        # 防止还在列表中
+        if(goodsID) in self.goodsList: self.goodsList.remove(goodsID)
+        del self.goodsMap[goodsID]
+
+controller = Controller()
 
 # 港口
 class Berth:
     def __init__(self, x=0, y=0, transport_time=0, loading_speed=0):
-        self.x = x # 港口坐标
-        self.y = y # 港口坐标
-        self.transport_time = transport_time # 港口运输时间
-        self.loading_speed = loading_speed # 港口装货速度
+        self._x = x # 港口坐标
+        self._y = y # 港口坐标
+        self._transport_time = transport_time # 港口运输时间
+        self._loading_speed = loading_speed # 港口装货速度
         
-        self.score = 0 # 港口评分
-        self.state = 0 # 港口状态
+        self.score = 0 # 港口评分 评分越高越优先
+        self.ability = 0 # 港口可达能力
+        self.weightExpe = 0 # 港口预期装载重量
+        self.weightReal = 0 # 港口实际装载重
+
+        self.state = 0 # 港口状态 [0表示无船，1表示有船]
+
 berth = [Berth() for _ in range(berth_num)]
 
 # 机器人
 class Robot:
     def __init__(self, id = 0, goods=0, startX=0, startY=0, status=0):
-        self.id = 0 # 机器人编号
-        self.goods = goods # 机器人是否携带物品[0无，1有]
-        self.x = startX # 机器人坐标
-        self.y = startY # 机器人坐标
-        self.status = status # 机器人状态 [0表示回复中，1表示正常]
-
+        self._id = 0 # 机器人编号
+        self._goods = goods # 机器人是否携带物品[0无，1有]
+        self._x = startX # 机器人坐标
+        self._y = startY # 机器人坐标
+        self._status = status # 机器人状态 [0表示回复中，1表示正常]
+        
+        self.last_x = startX
+        self.last_y = startY
         self.goodID = -1 # 机器人携带的货物编号
+        self.berthID = -1 # 机器人目标港口编号
         self.pathToget = [] # 机器人的取货路径规划
         self.pathTopull = [] # 机器人的卸货路径规划
         self.pathCache = [] # 机器人的历史路径缓存（预防碰撞）
+        self.forceStop = 0 # 机器人停止计数
 
     def go(self):
-        # 机器人取货
-        if(self.goods ==0 and self.x == goodList[self.goodID].x and self.y == goodList[self.goodID].y):
-            print("get", self.id)
+        # logger.info(self._id)
+        # logger.info(self._goods)
+        # logger.info(self._status)
+        # logger.info(self.goodID)
+        # logger.info(self.pathToget)
+        # logger.info(self.pathTopull)
+        
+        # 强制休息
+        if self.forceStop:
+            self.forceStop = 0
+            return 0
+        #  超时还没找到目标
+        if(self._goods == 0 and self.goodID !=-1 and controller.timeID - controller.goodsMap[self.goodID]._zhenID>1000):
+            if self.goodID in controller.goodsList:
+                controller.del_goods(self.goodID) # 移除货物
+            self.goodID = -1
+            self.pathToget.clear()
+            self.pathTopull.clear()
+            return 0
+        # 机器人刚刚完成取货，规划送货路径
+        if(self._goods == 1 and self.goodID != -1 and 
+           self._x == controller.goodsMap[self.goodID]._x and self._y == controller.goodsMap[self.goodID]._y):
+            
+            # 路由表中存在
+            for berthNum in controller.goodsMap[self.goodID].pathToBerth.keys():
+                if(berth[berthNum].state == 0):
+                    self.berthID = berthNum
+                    self.pathTopull = controller.goodsMap[self.goodID].pathToBerth[berthNum]
+                    self.pathTopull.reverse()
+                    break
+            # 路由表中不存在
+            # 如果最开始遍历GOODS的时候寻找所有港口的路径，这里就不需要再次寻找路径
+            ans_berch = goodsToBerth(controller.ch, self._x, self._y, berth, N = 10)
+            for i in range(len(ans_berch)):
+                controller.goodsMap[self.goodID].pathToBerth[ans_berch[i][0]] = ans_berch[i][1] # 更新路径
+            for berthNum in controller.goodsMap[self.goodID].pathToBerth.keys():
+                if(berth[berthNum].state == 0): # 选择第一个可用的港口
+                    self.berthID = berthNum
+                    self.pathTopull = controller.goodsMap[self.goodID].pathToBerth[berthNum]
+                    self.pathTopull.reverse()
+                    break
+            berth[self.berthID].weightExpe += 1
+        # 机器人到达取货点，准备取货
+        if(self._goods == 0 and self.goodID != -1 and
+           self._x == controller.goodsMap[self.goodID]._x and self._y == controller.goodsMap[self.goodID]._y
+           and controller.ch[self._x][self._y] == 'X'):
+            controller.ch[self._x][self._y] = '.' # 复原
+            print("get", self._id)
             sys.stdout.flush()
             return 0
         # 机器人卸货
-        if(self.goods ==1 and 
-           self.x == berth[goodList[self.goodID].stepToBerth[0][0]].x and self.y == berth[goodList[self.goodID].stepToBerth[0][0]].y):
-            print("pull", self.id)
+        if (self._goods == 1 and
+            (controller.ch[self._x][self._y] == 'B')
+           ):
+            print("pull", self._id)
             sys.stdout.flush()
+            berth[self.berthID].weightReal += 1
+            controller.del_goods(self.goodID) # 移除货物
+            self.goodID = -1
+            self.pathToget.clear()
+            self.pathTopull.clear()
             return 0
-        # 机器人移动
-        if(len(self.pathToget) != 0):
+        # 机器人移动取货
+        if(self.pathToget is not None and len(self.pathToget) != 0):
+            # 判断是否成功移动
+            if(self._x == self.last_x and self._y == self.last_y):
+                if self.pathCache != []:
+                    last_pos = self.pathCache.pop()
+                else:
+                    last_pos = (self._x, self._y)
+                self.pathToget.append(last_pos)
+            self.last_x = self._x
+            self.last_y = self._y
+
             self.nextpos = self.pathToget.pop()
+            while(self.nextpos == (self._x,self._y) and len(self.pathToget) != 0):
+                self.nextpos = self.pathToget.pop()
+
+            self.pathCache.append((self.nextpos))
+            if(len(self.pathCache)>cacheSize):
+                del self.pathCache[0]
+            fx = 0 # 方向 0右 1左 2上 3下.左边是题目说的，xy反了，看了好久 好坑
+            # 路重新寻址
+            if(self.nextpos[0]-self._x != 0 and self.nextpos[1]-self._y != 0):
+                self.pathToget = saveReDfs(controller.ch, self._x, self._y, self.pathToget, set())
+            if(self.nextpos[0] > self._x):
+                print("move", self._id, 3)
+                sys.stdout.flush()
+            if(self.nextpos[0] < self._x):
+                print("move", self._id, 2)
+                sys.stdout.flush()
+            if(self.nextpos[1] < self._y):
+                print("move", self._id, 1)
+                sys.stdout.flush()
+            if(self.nextpos[1] > self._y):
+                print("move", self._id, 0)
+                sys.stdout.flush()
+            return 0
+        if(self.pathTopull is not None and len(self.pathTopull) != 0):
+            # 判断是否成功移动
+            if(self._x == self.last_x and self._y == self.last_y):
+                if self.pathCache != []:
+                    last_pos = self.pathCache.pop()
+                else:
+                    last_pos = (self._x, self._y)
+                self.pathToget.append(last_pos)
+            self.last_x = self._x
+            self.last_y = self._y
+
+            self.nextpos = self.pathTopull.pop()
+            while(self.nextpos == (self._x,self._y) and len(self.pathTopull) != 0):
+                self.nextpos = self.pathTopull.pop()
+            
             self.pathCache.append(self.nextpos)
             if(len(self.pathCache)>cacheSize):
                 del self.pathCache[0]
-            print("move", self.id, 1)
-            sys.stdout.flush()
-           
+            # 路重新寻址
+            if(self.nextpos[0]-self._x != 0 and self.nextpos[1]-self._y != 0):
+                self.pathTopull = saveReDfs(controller.ch, self._x, self._y, self.pathTopull, set())
+            fx = 0 # 方向 0右 1左 2上 3下
+            if(self.nextpos[0] > self._x):
+                print("move", self._id, 3)
+                sys.stdout.flush()
+            if(self.nextpos[0] < self._x):
+                print("move", self._id, 2)
+                sys.stdout.flush()
+            if(self.nextpos[1] < self._y):
+                print("move", self._id, 1)
+                sys.stdout.flush()
+            if(self.nextpos[1] > self._y):
+                print("move", self._id, 0)
+                sys.stdout.flush()
+            return 0
+        if self._goods == 0 and self.pathToget==[]:
+            self.goodID = -1 # 刷新
 robot = [Robot() for _ in range(robot_num)]
 
 # 船
 class Boat:
     def __init__(self, num=0, status=0):
-        self.num = num # 船的编号
-        self.status = status # 船的状态
-        self.pos = 0 # 船的泊位编号
-        self.capacity = 0 # 船的载货量
-boat = [Boat() for _ in range(boat_num)]
+        self._num = num # 船的编号
+        self._status = status # 船的状态
+        self._pos = -1 # 船的泊位编号
+        self._capacity = 0 # 船的最大承重量
+
+        self.goalPos = -1 # 船的目标泊位编号
+        self.weight = 0    # 船的载货重量
+        self.berthTime = 0 # 船的停泊时间
+    def go(self):
+        # logger.info("boat:{}".format(self._num))
+        # logger.info("status:{}".format(self._status))
+        # logger.info("pos:{}".format(self._pos))
+        if self._status == 0: # 在路上
+            return 0
+        elif self._status == 1 and self._pos!=-1: # 在码头装货
+            self.weight = min(berth[self._pos].weightReal,(controller.timeID - self.berthTime) * berth[self._pos]._loading_speed)
+            berth[self._pos].weightReal -= self.weight
+            if(self.weight>0.9*self._capacity or controller.timeID + berth[self._pos]._transport_time>=14900
+               or (self._pos not in controller.berthList[0:5])
+               ):
+                berth[self._pos].state = 0
+                print("go",self._num)
+                sys.stdout.flush()
+        elif self._status == 1 and self._pos== -1 :  #在虚拟点
+            for i in controller.berthList: # 选择最优港口
+                if(berth[i].state == 0):
+                    self.goalPos = i
+                    berth[self.goalPos].state = 1
+                    print("ship",self._num,self.goalPos)
+                    self.berthTime = controller.timeID  # 记录停泊时间
+                    sys.stdout.flush()
+                    return 0
+        return 0
+
+boat = [Boat(i) for i in range(boat_num)]
 
 
 # 货物（100帧15个,150*15)
 class Goods:
-    def __init__(self, x=0, y=0, value=0,id = 0):
-        self.x = x # 货物坐标
-        self.y = y # 货物坐标
-        self.value = value # 货物价值
-        self.id = id # 货物编号
+    def __init__(self, x=0, y=0, value=0, id = 0,zhenID=0):
+        self._x = x # 货物坐标
+        self._y = y # 货物坐标
+        self._value = value # 货物价值
+        self._id = id # 货物编号
+        self._zhenID = zhenID # 货物生成时间
 
         # 以下信息需要更新
-        self.goalBerth = -1
-        self.goalRobot = -1
-        self.stepToBerth = [] # 到各个港口的最短步数 {i,path}
-        self.stepToRobot = [] # 最近机器人的最短步数
+        self.pathToBerth = {} # 到各个港口的最短路径 (i,path)
+        self.minStep = 0
         self.score = 0 # 收益评分
 
     def update(self):
-        # 到最近港口的路径规划
-        ans_berch,ans_robot = bfsToBerth(ch, self.x, self.y, berth,robot)
-        # 更新到港口的最短路径
-        self.goalBerth = ans_berch[0][0]
-        MinNumStepToBerch = len(ans_berch[0][1])
-        # 更新到所有机器人的最短路径
-        self.goalRobot = ans_robot[0][0]
-        MinNumStepToRobot = len(ans_robot[0][1])
-        # 更新货物评分
-        global AllMoney, AllStep
-        AllMoney = AllMoney + self.value
-        AllStep = AllStep + MinNumStepToBerch + MinNumStepToRobot
-        self.score = self.value
-        # self.score = self.value - (self.stepToBerth.size() + 1)*(AllMoney/AllStep)
+        # 到最近N个港口的路径规划
+        ans_berch = goodsToBerth(controller.ch, self._x, self._y, berth, N = 10)
+        # 如果没有可达的港口
+        if(ans_berch == []):
+            if controller.goodsList !=[] and self._id in controller.goodsList:
+                controller.del_goods(self._id)
+            return
+        
+        # 更新货物-码头路由表
+        for i in range(len(ans_berch)):
+            self.pathToBerth[ans_berch[i][0]] = ans_berch[i][1] # 更新路径
+        
+        self.minStep = len(ans_berch[0][1]) # 最短路径
 
+        # 更新港口得分
+        for i in range(len(ans_berch)):
+            berth[ans_berch[i][0]].ability += 1/len(ans_berch[i][1]) # 只要可达就加分，但路程越长加的越少
+        
+
+        # 更新总体货物评分
+        controller.AllMoney = controller.AllMoney + self._value 
+        controller.AllStep = controller.AllStep + len(ans_berch[0][1])
+        
+        # 更新该货物评分
+        self.score = 1/len(ans_berch[0][1])
+        self.score = self._value - (len(ans_berch[0][1]))*(controller.AllMoney/controller.AllStep)
 
 # 初始化
 def Init():
     # 读取地图
     for i in range(0, n):
         line = input()
-        ch.append([c for c in line.split(sep=" ")]) 
+        line = line.replace('A', '.') # 将A替换为 “.”
+        controller.ch.append(list(line))
+    
     # 读取港口信息
     for i in range(berth_num):
         line = input()
         berth_list = [int(c) for c in line.split(sep=" ")]
         id = berth_list[0]
-        berth[id].x = berth_list[1]
-        berth[id].y = berth_list[2]
-        berth[id].transport_time = berth_list[3]
-        berth[id].loading_speed = berth_list[4]
+        berth[id]._x = berth_list[1]
+        berth[id]._y = berth_list[2]
+        berth[id]._transport_time = berth_list[3]
+        berth[id]._loading_speed = berth_list[4]
+
     boat_capacity = int(input()) # 读取船的载货量
+    for bo in boat:
+        bo._capacity = boat_capacity
     okk = input() # 读取OK
     print("OK") # 输出OK
     sys.stdout.flush()
 
+
 def Input():
     zhenID, money = map(int, input().split(" "))
+    controller.timeID = zhenID
     num = int(input())
     for i in range(num):
         x, y, val = map(int, input().split())
-        goodList.append(Goods(x, y, val,goodID))
-        goodID += 1
-        goodNum = goodNum+1 # 货物总数
+        controller.add_goods(x,y,val,zhenID)
     for i in range(robot_num):
-        robot[i].id = i
-        robot[i].goods, robot[i].x, robot[i].y, robot[i].status = map(int, input().split())
+        robot[i]._id = i
+        robot[i]._goods, robot[i]._x, robot[i]._y, robot[i]._status = map(int, input().split())
     for i in range(boat_num):
-        boat[i].status, boat[i].pos = map(int, input().split())
+        boat[i]._status, boat[i]._pos = map(int, input().split())
     okk = input()
     return zhenID
 
-
-LastflushGoodNum = 0 # 上一次刷新货物的标号
-
 def Update():
-    global LastflushGoodNum
-    # 刷新货物排序
-    if LastflushGoodNum != goodNum:
-        for i in range(LastflushGoodNum,goodNum):
-            goodList[i].update()
-        goodList.sort(key=lambda x: x.score, reverse=True)
-    LastflushGoodNum = goodNum
-    # 刷新机器人状态
-    for i in range(robot_num):
-        if robot[i].status == 1:
-            robot[i].status = 0
-            robot[i].goods = 0
-    pass
+    # 更新货物地图，删除超时货物
+    # logging.info("goodsList:{}".format(len(controller.goodsList)))
+    for goodsId in controller.goodsList:
+        if controller.timeID - controller.goodsMap[goodsId]._zhenID > 1000: # 超时货物
+            controller.del_goods(goodsId)
+    # 更新港口排序
+    for id in range(berth_num):
+        berth[id].score = berth[id].ability + berth[id].weightExpe + 10 * berth[id].weightReal
+
+    # for id in range(berth_num):
+    #     logger.info("berth:{} score:{} weightExpe:{} weightReal:{}".format(id,berth[id].score,berth[id].weightExpe,berth[id].weightReal))
+    controller.berthList.sort(key=lambda id: berth[id].score,reverse=True) # 港口评分排序(从大到小)
+
+    # 刷新机器人目标
+    for id in range(robot_num):
+        # 如果机器人有任务或状态异常，就不寻找目标
+        if robot[id].goodID != -1 or robot[id]._status == 0: continue
+        # 寻找距离机器人最近的N个货物
+        ans = robotToGoods(controller,robot[id]._x,robot[id]._y,N = 3)
+        # logger.info(ans)
+        if ans == []: continue
+        # 解析答案，选择N个货物中路径（取货+送货）最小的一个
+        maxScore = -100000
+        choiceGoodsID = -1
+        choicePath = []
+        for oneAns in ans: # pos:货物坐标 path:路径
+            currentID = oneAns[0]
+            currentPath = oneAns[1]
+            currentScore = controller.goodsMap[currentID].score
+            # 选择最短的路径 or 最高的价值？
+            if currentScore > maxScore:
+                maxScore = currentScore
+                choiceGoodsID = currentID
+                choicePath = currentPath
+        # 更新机器人目标
+        robot[id].goodID = choiceGoodsID
+        # 机器人取货路径规划
+        robot[id].pathToget = choicePath
+        robot[id].pathToget.reverse()
+        controller.pick_goods(choiceGoodsID) # 移除货物
 
 def Safe():
-    # 安全检测
-    pass
+    # 碰撞检测
+    occupied_points = set()
+    # 添加机器人现在坐标
+    for robot_id in range(robot_num):
+        occupied_points.add((robot[robot_id]._x, robot[robot_id]._y))
+    for robot_id in range(robot_num):
+        # 选择路径属性和目标路径
+        if robot[robot_id]._goods == 0:
+            path_attr_name = 'pathToget'
+        elif robot[robot_id]._goods == 1:
+            path_attr_name = 'pathTopull'
+        else:
+            return
+        # 获取当前目标位置
+        current_path = getattr(robot[robot_id], path_attr_name)
+        if current_path:  # 如果路径非空
+            pos = current_path[-1]  # 获取路径上最后一个位置
+        else:
+            continue  # 如果没有路径，则跳过当前机器人
+        # 检查是否已经被占用
+        if pos not in occupied_points: # 如果没有碰撞
+            occupied_points.add(pos)
+        else: # 如果有碰撞
+            new_path = saveReDfs(controller.ch, robot[robot_id]._x, robot[robot_id]._y, getattr(robot[robot_id], path_attr_name), occupied_points)
+            if new_path == []:
+                robot[robot_id].forceStop = 1  # 如果没有找到新路径，强制停止机器人
+            else:
+                setattr(robot[robot_id], path_attr_name, deepcopy(new_path))  # 更新路径
+            # 获取当前目标位置
+            current_path = getattr(robot[robot_id], path_attr_name)
+            if current_path:  # 如果路径非空
+                pos = current_path[-1]  # 获取路径上最后一个位置
+            else:
+                continue  # 如果没有路径，则跳过当前机器人
+            occupied_points.add(pos)
+            
 
 def Output():
     # 输出
     for i in range(robot_num):
         robot[i].go()
+    for i in range(boat_num):
+        boat[i].go()
     print("OK")
     sys.stdout.flush()
 
-
 if __name__ == "__main__":
     Init()
-    for zhen in range(1, 15001):
-        zhenID = Input()
-        # Update()
-        # Safe()
-        # Output()
+    # logging.basicConfig(level=logging.INFO)
+    # logger.remove()
+    # date = time.strftime('%Y-%m-%d-%H-%M', time.localtime(time.time()))
+    # logger.add(sink=os.path.join('log{}.log'.format(date)), level="INFO", retention='1 year')
+    # logger.add(sys.stderr)
+    # logger.info("start")
+
+    for k in range(1, 15001):
+        id = Input()
+        # logging.info("id:{}".format(id))
+        Update()
+        Safe()
+        Output()

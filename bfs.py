@@ -120,12 +120,13 @@ def test_goodToberth():
         def __init__(self, x=0, y=0,):
             self._x = x # 港口坐标
             self._y = y # 港口坐标
-    berth = [Berth(5,0),Berth(4,1),Berth(3,2),Berth(2,3),Berth(1,4),Berth(0,5)]
+    berth = [Berth(10,10) for _ in range(1)]
     n = 11
     ch = [['.' for i in range(n)] for j in range(n)]
     i = 0
     j = 0
-    N = 4
+
+    N = 1
     ans = goodsToBerth(ch, i, j, berth,N)
     print(ans)
 
@@ -142,5 +143,5 @@ def test_saveReDfs():
 
 if __name__ == "__main__":
     print("bfs")
-    test_goodToberth()
-    # test_saveReDfs()
+    # test_goodToberth()
+    test_saveReDfs()

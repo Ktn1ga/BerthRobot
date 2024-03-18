@@ -14,10 +14,8 @@ def robotToGoods(controller, i, j, N):
     directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]
     path_list_goods = []
     while queue:
-        # 打乱directions
-        random.shuffle(directions)
         # count += 1
-        # if(count > 2000):
+        # if(count > 2000*200): #截至搜索的条件
         #     return []
         # 从队列中取出当前位置和到达当前位置的路径
         (x, y), path = queue.popleft()
@@ -29,9 +27,10 @@ def robotToGoods(controller, i, j, N):
                 if(controller.goodsMap[itr_goodsId]._x == x and controller.goodsMap[itr_goodsId]._y == y):
                     goodsIdForRobot = itr_goodsId
                     break
-            # 如果货物ID不能及时获取，不加入
+            # 如果货物不能及时获取，不加入
             if(controller.timeID - controller.goodsMap[goodsIdForRobot]._zhenID + len(path) > 1000):
                 continue
+            path.pop(0)
             path_list_goods.append([goodsIdForRobot,path])
         # 如果找到了目标位置，返回路径
         if len(path_list_goods) >= N:
@@ -59,8 +58,6 @@ def goodsToBerth(ch, i, j, berth,N):
     directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]
     path_list_berch = []
     while queue:
-        # 打乱directions
-        random.shuffle(directions)
         # 从队列中取出当前位置和到达当前位置的路径
         (x, y), path = queue.popleft()
         # 找港口 
@@ -68,6 +65,7 @@ def goodsToBerth(ch, i, j, berth,N):
             targetx, targety = berth[i]._x, berth[i]._y
             # 如果当前位置是目标位置，返回路径
             if (x, y) == (targetx, targety):
+                path.pop(0)
                 path_list_berch.append([i,path])
         # 如果找到了目标位置，返回路径
         if len(path_list_berch) >= N:
@@ -97,11 +95,10 @@ def saveReDfs(ch, i, j, ori_list, occupied_points):
     directions = [(-1, 0), (0, -1), (1, 0), (0, 1)]
 
     while queue:
-        # 打乱directions
-        random.shuffle(directions) 
         # 从队列中取出当前位置和到达当前位置的路径
         (x, y), path = queue.popleft()
         if (x, y) in ori_list and (x,y) not in occupied_points and (x,y) != (i,j):
+            path.pop(0)
             return ori_list[0:ori_list.index((x,y))] + path[::-1]
         # 探索当前位置的所有相邻位置
         for dx, dy in directions:
@@ -116,12 +113,34 @@ def saveReDfs(ch, i, j, ori_list, occupied_points):
                 queue.append(((nx, ny), path + [(nx, ny)]))
     return []
 
-if __name__ == "__main__":
+def test_goodToberth():
+    print("test_goodToberth")
+    # 港口
+    class Berth:
+        def __init__(self, x=0, y=0,):
+            self._x = x # 港口坐标
+            self._y = y # 港口坐标
+    berth = [Berth(5,0),Berth(4,1),Berth(3,2),Berth(2,3),Berth(1,4),Berth(0,5)]
     n = 11
     ch = [['.' for i in range(n)] for j in range(n)]
-    occupied_points = [(9,0)]
-    ori_list = [(0,0),(1,0),(2,0),(3,0),(4,0),(5,0),(6,0),(7,0),(8,0),(9,0),(10,0)]
-    i = 10
+    i = 0
     j = 0
+    N = 4
+    ans = goodsToBerth(ch, i, j, berth,N)
+    print(ans)
+
+def test_saveReDfs():
+    n = 11
+    ch = [['.' for i in range(n)] for j in range(n)]
+    occupied_points = [(1,1)]
+    ori_list = [(1,1)]
+    i = 0
+    j = 1
     newList = saveReDfs(ch, i, j, ori_list, occupied_points)
-    # print(newList)
+    print(ori_list)
+    print(newList)
+
+if __name__ == "__main__":
+    print("bfs")
+    test_goodToberth()
+    # test_saveReDfs()

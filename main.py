@@ -1,4 +1,4 @@
-# from loguru import logger  # 日志
+from loguru import logger  # 日志
 import time
 import os
 import sys
@@ -19,6 +19,7 @@ class Controller:
     def __init__(self):
         self.ch = [] # 地图
         self.timeID = 0 # 时间标号
+        self.money = 0 # 金钱
         self.goodsID = 0 # 货物标号
 
         self.goodsMap =  {} # 货物字典  {货物编号，货物对象}
@@ -92,14 +93,6 @@ class Robot:
         self.forceStop = 0 # 机器人停止计数
 
     def go(self):
-        # if(self._id==7):
-        #     logger.info(self._id)
-        #     logger.info("({},{})".format(self._x,self._y))
-        #     logger.info(self._goods)
-        #     logger.info(self._status)
-        #     logger.info(self.goodID)
-        #     logger.info(self.pathToget)
-        #     logger.info(self.pathTopull)
         
         # 强制休息
         if self.forceStop:
@@ -142,11 +135,9 @@ class Robot:
             sys.stdout.flush()
             berth[self.berthID].weightReal += 1
             berth[self.berthID].weightExpe -= 1
-
             controller.testvalue +=  controller.goodsMap[self.goodID]._value
             controller.del_goods(self.goodID) # 移除货物
             self.goodID = -1
-            self.pathToget.clear()
             self.pathTopull.clear()
             # 这里是不是就要找新物品了
             # return 0
@@ -247,44 +238,69 @@ class Boat:
 
         self.goalPos = -1 # 船的目标泊位编号
         self.weight = 0    # 船的载货重量
-        self.berthTime = 0 # 船的停泊时间
+        self.berthTimepoint = 0 # 船的停泊时间点
     def go(self):
         # logger.info("boat:{}  status:{}  pos:{}".format(self._num,self._status,self._pos))
         if self._status == 0: # 在路上
             return 0
+        elif self._pos!=-1 and controller.timeID + berth[self._pos]._transport_time>= 14900:
+            # 更新港口和船的货物信息
+            berthTime = controller.timeID - self.berthTimepoint
+            self.berthTimepoint = controller.timeID
+            addweight = min(berthTime * berth[self._pos]._loading_speed, berth[self._pos].weightReal)
+            self.weight += addweight
+            berth[self._pos].weightReal -= addweight
+
+            berth[self._pos].state = 0
+            print("go",self._num)
+            sys.stdout.flush()
+            return 0
+        
         elif self._status == 1 and self._pos!=-1: # 在码头装货
-            self.weight += (controller.timeID - self.berthTime) * berth[self._pos]._loading_speed
-            self.berthTime = controller.timeID 
-            self.weight = min(berth[self._pos].weightReal,self.weight)
+            # 更新港口和船的货物信息
+            berthTime = controller.timeID - self.berthTimepoint
+            self.berthTimepoint = controller.timeID
+            addweight = min(berthTime * berth[self._pos]._loading_speed, berth[self._pos].weightReal)
+            self.weight += addweight
+            berth[self._pos].weightReal -= addweight
+
             # 必须要走
-            if(controller.timeID + berth[self._pos]._transport_time>= 14900 or self.weight>=self._capacity):
-                berth[self._pos].weightReal -= self.weight
-                berth[self._pos].state -= 1
+            if( (controller.timeID + berth[self._pos]._transport_time) >= 14900 or self.weight >= self._capacity):
+                berth[self._pos].state = 0
+                berth[self.goalPos].state = 1
                 print("go",self._num)
                 sys.stdout.flush()
+                return 0
             # 有更优选择
             elif (self._pos not in controller.berthList[0:6]
                   or controller.timeID + 500 + 1000 + boat_capacity >= 14900):
-                berth[self._pos].weightReal -= self.weight
-                berth[self._pos].state -= 1
+                # 更新港口和船的货物信息
+                berthTime = controller.timeID - self.berthTimepoint
+                self.berthTimepoint = controller.timeID
+                addweight = min(berthTime * berth[self._pos]._loading_speed, berth[self._pos].weightReal)
+                self.weight += addweight
+                berth[self._pos].weightReal -= addweight
+
+                berth[self._pos].state = 0
                 for i in controller.berthList: # 选择最优港口
-                    self.goalPos = i
-                    berth[self.goalPos].state +=1
-                    print("ship",self._num,self.goalPos)
-                    sys.stdout.flush()
-                    self.berthTime = controller.timeID + berth[self.goalPos]._transport_time  # 记录停泊时间
-                    break
-        elif self._status == 1 and self._pos== -1 :  #在虚拟点
+                    if(berth[i].score > 0 and berth[i].state < 1 ):
+                        self.goalPos = i
+                        berth[self.goalPos].state = 1
+                        print("ship",self._num,self.goalPos)
+                        sys.stdout.flush()
+                        self.berthTime = controller.timeID + berth[self.goalPos]._transport_time  # 记录停泊时间
+                        break
+        elif (self._status == 1 and self._pos== -1) :  #在虚拟点
             for i in controller.berthList: # 选择最优港口
-                if(berth[i].score >= 0 and berth[i].state < 1 
+                if(berth[i].score > 0 and berth[i].state < 1 
                 #    or berth[i].score >= 1.8 * boat_capacity and berth[i].state < 2 
                 ):
                     self.goalPos = i
-                    berth[self.goalPos].state +=1
+                    berth[self.goalPos].state =1
                     print("ship",self._num,self.goalPos)
                     sys.stdout.flush()
                     self.weight = 0    # 船的载货重量
-                    self.berthTime = controller.timeID + berth[self.goalPos]._transport_time  # 记录停泊时间
+                    self.berthTimepoint = controller.timeID + berth[self.goalPos]._transport_time  # 记录停泊时间
                     return 0
         return 0
 
@@ -325,8 +341,8 @@ class Goods:
             berth[ans_berch[i][0]].ability += 1/len(ans_berch[i][1]) # 只要可达就加分，但路程越长加的越少
         
         # 更新总体货物评分
-        controller.AllMoney = controller.AllMoney + self._value 
-        controller.AllStep = controller.AllStep + len(ans_berch[0][1])
+        controller.AllMoney += self._value 
+        controller.AllStep += 2* len(ans_berch[0][1])
         
         # 更新该货物评分
         # self.score = 1/len(ans_berch[0][1])
@@ -365,6 +381,7 @@ def Init():
 def Input():
     zhenID, money = map(int, input().split(" "))
     controller.timeID = zhenID
+    controller.money = money
     num = int(input())
     for i in range(num):
         x, y, val = map(int, input().split())
@@ -385,19 +402,19 @@ def Update():
             controller.del_goods(goodsId)
     # 更新港口排序
     for id in range(berth_num):    
-        berth[id].score = berth[id].weightExpe + berth[id].weightReal
-        # berth[id].score = berth[id].ability + berth[id].weightExpe + 10 * berth[id].weightReal
+        # berth[id].score = berth[id].weightExpe + berth[id].weightReal
+        berth[id].score = berth[id].ability + berth[id].weightExpe + berth[id].weightReal
     
     controller.berthList.sort(key=lambda id: berth[id].score,reverse=True) # 港口评分排序(从大到小)
 
-    # logger.info("timeID:{}".format(controller.timeID))
+    logger.info("timeID:{} money:{} goodNum: {}".format(controller.timeID,controller.money,len(controller.goodsList)))
     # logger.info("berthList:{}".format(controller.berthList))
     # boat_poslist = [boat[i]._pos for i in range(boat_num)]
     # logger.info("boat_poslist:{}".format(boat_poslist))
     # for id in range(berth_num):
     #     logger.info("berth:{} state:{} score:{} ability:{}  weightExpe:{} weightReal:{}".format(id,berth[id].state,berth[id].score,berth[id].ability,berth[id].weightExpe,berth[id].weightReal))
     # for id in range(boat_num):
-    #     logger.info("boat:{} status:{} pos:{} weight:{}".format(id,boat[id]._status,boat[id]._pos,boat[id].weight))
+    #     logger.info("boat:{} status:{} pos:{} weight:{} berthTime:{}".format(id,boat[id]._status,boat[id]._pos,boat[id].weight,boat[id].berthTimepoint))
 
     # 刷新机器人目标
     for id in range(robot_num):
@@ -405,7 +422,8 @@ def Update():
         if robot[id].goodID != -1 or robot[id]._status == 0: continue
 
         # 寻找距离机器人最近的N个货物
-        search_num = min(len(controller.goodsList)/10,20)
+        # 搜索的数量，会影响速度
+        search_num = min(len(controller.goodsList)/10,5)
     
         ans = robotToGoods(controller,robot[id]._x,robot[id]._y,N = search_num)
         # logger.info(ans)
@@ -417,16 +435,14 @@ def Update():
         for oneAns in ans: # pos:货物坐标 path:路径
             currentID = oneAns[0]
             currentPath = oneAns[1]
-
-            currentScore = controller.goodsMap[currentID].score
             
-            # if controller.AllStep == 0:
-            #     currentScore = controller.goodsMap[currentID].score
-            # else:
-            #     currentScore = controller.goodsMap[currentID].score - len(currentPath) * controller.AllMoney/controller.AllStep
+            if controller.AllStep == 0:
+                currentScore = controller.goodsMap[currentID].score
+            else:
+                currentScore = controller.goodsMap[currentID].score - len(currentPath) * controller.AllMoney/controller.AllStep
+
             # currentScore = controller.goodsMap[currentID]._value
 
-            # 选择最短的路径 or 最高的价值？
             if currentScore > maxScore:
                 maxScore = currentScore
                 choiceGoodsID = currentID
@@ -501,7 +517,8 @@ def Safe():
 
 def Output():
     # 输出
-    for i in range(robot_num):
+    #  碰撞时候顺序处理，机器人要逆序输出
+    for i in range(robot_num-1,-1,-1):
         robot[i].go()
     for i in range(boat_num):
         boat[i].go()
@@ -510,11 +527,11 @@ def Output():
 
 if __name__ == "__main__":
     Init()
-    # logger.remove()
-    # date = time.strftime('%Y-%m-%d-%H-%M', time.localtime(time.time()))
-    # logger.add(sink=os.path.join('log{}.log'.format(date)), level="INFO", retention='1 year')
-    # logger.add(sys.stderr)
-    # logger.info("start")
+    logger.remove()
+    date = time.strftime('%Y-%m-%d-%H-%M', time.localtime(time.time()))
+    logger.add(sink=os.path.join('log{}.log'.format(date)), level="INFO", retention='1 year')
+    logger.add(sys.stderr)
+    logger.info("start")
     for k in range(1, 15001):
         id = Input()
         # logger.info("id:{}   testvalue:{}".format(id,controller.testvalue))

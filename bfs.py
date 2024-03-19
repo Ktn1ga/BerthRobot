@@ -14,9 +14,9 @@ def robotToGoods(controller, i, j, N):
     directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]
     path_list_goods = []
     while queue:
-        # count += 1
-        # if(count > 2000*200): #截至搜索的条件
-        #     return []
+        count += 1
+        if(count > 200 * 200 * 100): #截至搜索的条件
+            return []
         # 从队列中取出当前位置和到达当前位置的路径
         (x, y), path = queue.popleft()
         # 找货物

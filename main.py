@@ -93,6 +93,8 @@ class Robot:
         self.forceStop = 0 # 机器人停止计数
 
     def go(self):
+        # logger.info("robot:{}  goods:{}  x:{}  y:{}  status:{}".format(self._id,self._goods,self._x,self._y,self._status))
+        # logger.info("pathToGet{}".format(self.pathToget))
         
         # 强制休息
         if self.forceStop:
@@ -160,9 +162,17 @@ class Robot:
             self.last_x = self._x
             self.last_y = self._y
 
-            self.nextpos = self.pathToget.pop()
-            while(self.nextpos == (self._x,self._y) and len(self.pathToget) != 0):
-                self.nextpos = self.pathToget.pop()
+            if(len(self.pathToget) > 1):
+                if(self._x == self.pathToget[-1][0] and self._y == self.pathToget[-1][1]):
+                    self.pathToget.pop()
+                    self.nextpos = self.pathToget[-1]
+                else:
+                    self.nextpos = self.pathToget[-1]
+            elif len(self.pathToget) == 1:
+                if(self._x == self.pathToget[-1][0] and self._y == self.pathToget[-1][1]):
+                    self.pathToget.pop()
+                else:
+                    self.nextpos = self.pathToget[-1]
 
             fx = 0 # 方向 0右 1左 2上 3下.左边是题目说的，xy反了，看了好久 好坑
             # 路重新寻址
@@ -173,13 +183,13 @@ class Robot:
             if(self.nextpos[0] > self._x):
                 print("move", self._id, 3)
                 sys.stdout.flush()
-            if(self.nextpos[0] < self._x):
+            elif(self.nextpos[0] < self._x):
                 print("move", self._id, 2)
                 sys.stdout.flush()
-            if(self.nextpos[1] < self._y):
+            elif(self.nextpos[1] < self._y):
                 print("move", self._id, 1)
                 sys.stdout.flush()
-            if(self.nextpos[1] > self._y):
+            elif(self.nextpos[1] > self._y):
                 print("move", self._id, 0)
                 sys.stdout.flush()
             return 0
@@ -201,9 +211,17 @@ class Robot:
             self.last_x = self._x
             self.last_y = self._y
 
-            self.nextpos = self.pathTopull.pop()
-            while(self.nextpos == (self._x,self._y) and len(self.pathTopull) != 0):
-                self.nextpos = self.pathTopull.pop()
+            if(len(self.pathTopull) > 1):
+                if(self._x == self.pathTopull[-1][0] and self._y == self.pathTopull[-1][1]):
+                    self.pathTopull.pop()
+                    self.nextpos = self.pathTopull[-1]
+                else:
+                    self.nextpos = self.pathTopull[-1]
+            elif len(self.pathTopull) == 1:
+                if(self._x == self.pathTopull[-1][0] and self._y == self.pathTopull[-1][1]):
+                    self.pathTopull.pop()
+                else:
+                    self.nextpos = self.pathTopull[-1]
 
             # 路重新寻址
             if(self.nextpos[0]-self._x != 0 and self.nextpos[1]-self._y != 0):
@@ -213,13 +231,13 @@ class Robot:
             if(self.nextpos[0] > self._x):
                 print("move", self._id, 3)
                 sys.stdout.flush()
-            if(self.nextpos[0] < self._x):
+            elif(self.nextpos[0] < self._x):
                 print("move", self._id, 2)
                 sys.stdout.flush()
-            if(self.nextpos[1] < self._y):
+            elif(self.nextpos[1] < self._y):
                 print("move", self._id, 1)
                 sys.stdout.flush()
-            if(self.nextpos[1] > self._y):
+            elif(self.nextpos[1] > self._y):
                 print("move", self._id, 0)
                 sys.stdout.flush()
             return 0
@@ -265,7 +283,7 @@ class Boat:
             berth[self._pos].weightReal -= addweight
 
             # 必须要走
-            if( (controller.timeID + berth[self._pos]._transport_time) >= 14900 or self.weight >= self._capacity):
+            if( (controller.timeID + berth[self._pos]._transport_time) >= 14900 or self.weight >= 1* self._capacity):
                 berth[self._pos].state = 0
                 berth[self.goalPos].state = 1
                 print("go",self._num)
@@ -347,7 +365,7 @@ class Goods:
         # 更新该货物评分
         # self.score = 1/len(ans_berch[0][1])
         # self.score = self._value
-        self.score = self._value - (len(ans_berch[0][1])) * (controller.AllMoney/controller.AllStep) # 机器人找货物
+        self.score = self._value - 0.5*(len(ans_berch[0][1])) * (controller.AllMoney/controller.AllStep) # 机器人找货物
 
 # 初始化
 def Init():
@@ -408,9 +426,9 @@ def Update():
     controller.berthList.sort(key=lambda id: berth[id].score,reverse=True) # 港口评分排序(从大到小)
 
     logger.info("timeID:{} money:{} goodNum: {}".format(controller.timeID,controller.money,len(controller.goodsList)))
-    # logger.info("berthList:{}".format(controller.berthList))
-    # boat_poslist = [boat[i]._pos for i in range(boat_num)]
-    # logger.info("boat_poslist:{}".format(boat_poslist))
+    logger.info("berthList:{}".format(controller.berthList))
+    boat_poslist = [boat[i]._pos for i in range(boat_num)]
+    logger.info("boat_poslist:{}".format(boat_poslist))
     # for id in range(berth_num):
     #     logger.info("berth:{} state:{} score:{} ability:{}  weightExpe:{} weightReal:{}".format(id,berth[id].state,berth[id].score,berth[id].ability,berth[id].weightExpe,berth[id].weightReal))
     # for id in range(boat_num):
@@ -423,7 +441,7 @@ def Update():
 
         # 寻找距离机器人最近的N个货物
         # 搜索的数量，会影响速度
-        search_num = min(len(controller.goodsList)/10,5)
+        search_num = len(controller.goodsList)/10
     
         ans = robotToGoods(controller,robot[id]._x,robot[id]._y,N = search_num)
         # logger.info(ans)
@@ -439,7 +457,7 @@ def Update():
             if controller.AllStep == 0:
                 currentScore = controller.goodsMap[currentID].score
             else:
-                currentScore = controller.goodsMap[currentID].score - len(currentPath) * controller.AllMoney/controller.AllStep
+                currentScore = controller.goodsMap[currentID].score - 0.5* len(currentPath) * controller.AllMoney/controller.AllStep
 
             # currentScore = controller.goodsMap[currentID]._value
 
@@ -470,6 +488,7 @@ def Safe():
            and (robot[robot_id-1]._x, robot[robot_id-1]._y) in occupied_points
            ):
             occupied_points.remove((robot[robot_id-1]._x, robot[robot_id-1]._y))
+        
         # 选择路径属性和目标路径
         if robot[robot_id]._goods == 0:
             path_attr_name = 'pathToget'
@@ -479,6 +498,7 @@ def Safe():
             return
         # 获取当前目标位置
         current_path = getattr(robot[robot_id], path_attr_name)
+
         if current_path:  # 如果路径非空
             pos = current_path[-1]  # 获取路径上最后一个位置
             # 路径规划是当前位置
@@ -518,7 +538,7 @@ def Safe():
 def Output():
     # 输出
     #  碰撞时候顺序处理，机器人要逆序输出
-    for i in range(robot_num-1,-1,-1):
+    for i in range(robot_num):
         robot[i].go()
     for i in range(boat_num):
         boat[i].go()

@@ -3,9 +3,8 @@
 from collections import deque
 import random
 # 路径规划: 机器人到货物
-def robotToGoods(controller, i, j, N):
+def robotToGoods(controller, i, j, N=1):
     ch = controller.ch
-    count = 0
     # 初始化队列，用于存储待探索的位置及其路径
     queue = deque([((i, j), [(i, j)])]) # (最后位置，历史路径)
     # # 记录已访问的位置
@@ -14,9 +13,6 @@ def robotToGoods(controller, i, j, N):
     directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]
     path_list_goods = []
     while queue:
-        count += 1
-        if(count > 200 * 200 * 100): #截至搜索的条件
-            return []
         # 从队列中取出当前位置和到达当前位置的路径
         (x, y), path = queue.popleft()
         # 找货物
@@ -33,7 +29,7 @@ def robotToGoods(controller, i, j, N):
             path.pop(0)
             path_list_goods.append([goodsIdForRobot,path])
         # 如果找到了目标位置，返回路径
-        if len(path_list_goods) >= N:
+        if len(path_list_goods) >= N or (len(path_list_goods)>0 and len(path_list_goods[0][1])>800):
             return path_list_goods
         # 探索当前位置的所有相邻位置
         for dx, dy in directions:
@@ -93,11 +89,12 @@ def saveReDfs(ch, i, j, ori_list, occupied_points):
 
     #  判断机器人的初始位置，选择不同的方向
     directions = [(-1, 0), (0, -1), (1, 0), (0, 1)]
-
+    print("occu:",occupied_points)
     while queue:
         # 从队列中取出当前位置和到达当前位置的路径
         (x, y), path = queue.popleft()
-        if (x, y) in ori_list and (x,y) not in occupied_points and (x,y) != (i,j):
+        # print("x,y:",x,y,"path:",path)
+        if (x, y) in ori_list and (x,y) not in occupied_points:
             path.pop(0)
             return ori_list[0:ori_list.index((x,y))] + path[::-1]
         # 探索当前位置的所有相邻位置
@@ -131,12 +128,13 @@ def test_goodToberth():
     print(ans)
 
 def test_saveReDfs():
-    n = 11
+    n = 15
     ch = [['.' for i in range(n)] for j in range(n)]
-    occupied_points = [(1,1)]
-    ori_list = [(1,1)]
+    occupied_points = [(0,9)]
+    ori_list = [(0,9)]
     i = 0
-    j = 1
+    j = 10
+    # (13,0)
     newList = saveReDfs(ch, i, j, ori_list, occupied_points)
     print(ori_list)
     print(newList)
